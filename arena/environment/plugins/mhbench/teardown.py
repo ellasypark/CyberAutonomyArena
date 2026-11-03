@@ -7,6 +7,7 @@ from ....config import ExperimentManagerConfig
 from .deployer import _mhb_config_args
 from ....experiment import Experiment
 from .deployer import resolve_topology_path
+from .process_env import mhbench_cli_env
 from ....experiment_log import init_logger, log, output_root
 
 
@@ -26,6 +27,7 @@ def _teardown_sync(experiment: Experiment, cfg: ExperimentManagerConfig) -> None
             [str(python), str(cli), *_mhb_config_args(cfg), "teardown", "--yes", str(topology_path), "--project-name", name],
             cwd=str(mhbench_dir),
             stdout=lf, stderr=lf,
+            env=mhbench_cli_env(cfg),
         )
     if result.returncode != 0:
         raise RuntimeError(

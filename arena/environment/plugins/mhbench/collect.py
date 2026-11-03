@@ -9,6 +9,7 @@ import subprocess
 from ....config import ExperimentManagerConfig
 from ....experiment import Experiment
 from .deployer import resolve_topology_path
+from .process_env import mhbench_cli_env
 from ....experiment_log import init_logger, log, output_root
 
 _COLLECT_TIMEOUT_S = 600
@@ -43,6 +44,7 @@ def _collect_sync(experiment: Experiment, cfg: ExperimentManagerConfig) -> None:
             cwd=str(mhbench_dir),
             stdout=lf, stderr=lf,
             start_new_session=True,
+            env=mhbench_cli_env(cfg),
         )
         try:
             rc = proc.wait(timeout=_COLLECT_TIMEOUT_S)

@@ -13,6 +13,7 @@ from ....config import ExperimentManagerConfig
 from ...environment import DeployedEnvironment
 from ....experiment import Experiment
 from ....experiment_log import init_logger, log, output_root
+from .process_env import mhbench_cli_env
 
 
 _EXC_RE = re.compile(r"^[A-Za-z_][\w.]*(Error|Exception): ")
@@ -345,7 +346,9 @@ def _provision_sync(
     environment_spec: str,
     c2c_url: Optional[str],
     cfg: ExperimentManagerConfig,
-) -> tuple[DeployedEnvironment, Optional[str]]:
+    guardrail_mode: str = "off",
+    guardrail_policy: Optional[str] = None,
+)-> tuple[DeployedEnvironment, Optional[str]]:
     mhbench_dir = cfg.mhbench_dir
     topology_path = resolve_topology_path(environment_spec, cfg)
     python = mhbench_dir / ".venv" / "bin" / "python"
@@ -361,12 +364,40 @@ def _provision_sync(
     if c2c_url:
         cmd += ["--c2c-url", c2c_url]
 
+    # Build a per-process environment so guardrail selection is scoped to this
+    # experiment and does not mutate Arena's own environment.
+    process_env = mhbench_cli_env(cfg)
+    process_env.pop("MHBENCH_ENV_GUARDRAIL_POLICY", None)
+
+    if guardrail_mode not in ("off", "on"):
+        raise ValueError("guardrail_mode must be either 'off' or 'on'")
+
+    if guardrail_mode == "on":
+        if not guardrail_policy:
+            raise ValueError("Guardrail policy is required when guardrail_mode is 'on'")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", guardrail_policy):
+            raise ValueError(
+                "Invalid guardrail policy name; use letters, numbers, '_' or '-' only"
+            )
+
+        policy_root = (Path(mhbench_dir) / "guardrail_policies").resolve()
+        policy_file = (policy_root / f"{guardrail_policy}.yaml").resolve()
+        try:
+            policy_file.relative_to(policy_root)
+        except ValueError as exc:
+            raise ValueError("Guardrail policy must be inside guardrail_policies/") from exc
+        if not policy_file.is_file():
+            raise FileNotFoundError(f"Guardrail policy file not found: {policy_file}")
+
+        process_env["MHBENCH_ENV_GUARDRAIL_POLICY"] = str(policy_file)
+
     init_logger(experiment_name, output_root(experiment_name, cfg))
     mhbench_log = output_root(experiment_name, cfg) / experiment_name / "experiment" / "mhbench.log"
     mhbench_log.parent.mkdir(parents=True, exist_ok=True)
     log(experiment_name, f"Provisioning environment via MHBench CLI (log: {mhbench_log})...")
     with open(mhbench_log, "a") as lf:
-        result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT)
+        result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT,
+                                env=process_env)
     if result.returncode != 0:
         raise _mhbench_error("provision", result.returncode, mhbench_log)
 
@@ -414,7 +445,7 @@ def _configure_sync(
     log(experiment_name, f"Running Ansible configuration via MHBench CLI (per-host logs: {ansible_log_dir})...")
     with open(mhbench_log, "a") as lf:
         result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT,
-                                env={**os.environ, "MHBENCH_ANSIBLE_LOG_DIR": str(ansible_log_dir)})
+                                env=mhbench_cli_env(cfg, MHBENCH_ANSIBLE_LOG_DIR=str(ansible_log_dir)))
     if result.returncode != 0:
         raise _mhbench_error("configure", result.returncode, mhbench_log)
 
@@ -465,7 +496,8 @@ def _request_ingress_sync(experiment_name: str, environment_spec: str, bastion_i
     mhbench_log.parent.mkdir(parents=True, exist_ok=True)
     log(experiment_name, f"Requesting defender box ingress {ingress} via MHBench CLI...")
     with open(mhbench_log, "a") as lf:
-        result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT)
+        result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT,
+                                env=mhbench_cli_env(cfg))
     if result.returncode != 0:
         raise _mhbench_error("request-ingress", result.returncode, mhbench_log)
     log(experiment_name, "Defender box ingress provisioned.")
@@ -504,7 +536,8 @@ def _host_op_sync(op: str, experiment_name: str, environment_spec: str, cfg: Exp
     mhbench_log.parent.mkdir(parents=True, exist_ok=True)
     log(experiment_name, f"MHBench {op} via CLI (log: {mhbench_log})...")
     with open(mhbench_log, "a") as lf:
-        result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT)
+        result = subprocess.run(cmd, cwd=str(mhbench_dir), stdout=lf, stderr=subprocess.STDOUT,
+                                env=mhbench_cli_env(cfg))
     if result.returncode != 0:
         raise _mhbench_error(op, result.returncode, mhbench_log)
     return json.loads(out_path.read_text()) if out_path.exists() else {}

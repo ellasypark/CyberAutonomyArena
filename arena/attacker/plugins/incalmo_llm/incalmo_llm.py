@@ -120,6 +120,11 @@ class IncalmoLLMAttacker(AttackerPlugin, config_type="incalmo_llm"):
     planning_llm: str
     execution_llm: str = ""
     abstraction: str = "incalmo"
+    # Guardrail passthrough — Incalmo's own AttackerConfig validates legal harness/policy
+    # combinations, so the arena doesn't need to know every harness it supports.
+    guardrail_model: str = "none"
+    guardrail_harness: str = "none"
+    guardrail_policy: Optional[str] = None
 
     def _code_dir(self, cfg: ExperimentManagerConfig) -> Path:
         return cfg.plugin_dir(self.code_dir_field)
@@ -216,10 +221,37 @@ class IncalmoLLMAttacker(AttackerPlugin, config_type="incalmo_llm"):
                         "agent_all": "agent_all",
                     },
                 },
+                # Covers every harness Incalmo currently defines (HarnessGuardrail) — here
+                # guardrail_in_prompt actually does something, since there's a real LLM prompt to inject into.
+                {
+                    "field_type": "flat_checkboxes",
+                    "label": "Guardrail harness",
+                    "key": "guardrail_harness",
+                    "options": ["none", "deterministic_guardrail", "guardrail_in_prompt", "environment_firewall"],
+                    "short_names": {
+                        "none": "none",
+                        "deterministic_guardrail": "det_guard",
+                        "guardrail_in_prompt": "prompt_guard",
+                        "environment_firewall": "env_firewall"
+                    },
+                },
+                {
+                    "field_type": "text_with_suggestions",
+                    "label": "Guardrail policy (required by any harness above except 'none')",
+                    "key": "guardrail_policy",
+                    "suggestions": ["mini_entB_block", "equifax_block_actions", "equifax_block_nikto", "equifax_block_database", "example"],
+                    "default": "",
+                },
+                    
             ],
         }
 
     def build_config(self, experiment_name: str, env_spec: AttackerEnvSpec, prepared: PreparedAttacker) -> dict:
+        # environment_firewall is enforced by the environment (for example, MHBench's
+        # GCP firewall), not by Incalmo's own guardrail engine. Keep Incalmo's
+        # guardrails disabled for this selection so it does not validate or consume
+        # the environment firewall policy as an Incalmo harness policy.
+        environment_firewall = self.guardrail_harness == "environment_firewall"
         return {
             "name": experiment_name,
             "strategy": {
@@ -231,6 +263,11 @@ class IncalmoLLMAttacker(AttackerPlugin, config_type="incalmo_llm"):
             "c2c_server": prepared.local_url,
             "agent_c2c_server": prepared.remote_url,
             "blacklist_ips": ["172.17.0.0/16"],
+            "guardrails": {
+                "model": "none" if environment_firewall else self.guardrail_model,
+                "harness": "none" if environment_firewall else self.guardrail_harness,
+                "policy": None if environment_firewall else self.guardrail_policy,
+            },
         }
 
     async def run(self, prepared: PreparedAttacker, config_path: Path, experiment_name: str, cfg: ExperimentManagerConfig) -> asyncio.subprocess.Process:

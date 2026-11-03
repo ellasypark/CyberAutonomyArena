@@ -66,6 +66,52 @@ class ExperimentSpecs(BaseModel):
     overwrite: bool = False
     priority: int = 0
 
+    @model_validator(mode="before")
+    @classmethod
+    def _route_environment_firewall(cls, data):
+        """Route the Incalmo UI selection to the environment plugin config.
+
+        ``environment_firewall`` is implemented by the environment (for example,
+        MHBench's GCP firewall), so it must not be treated as an Incalmo harness.
+        The attacker plugin still receives its selection and can keep its own
+        guardrails disabled while the environment receives the firewall settings.
+        """
+        if not isinstance(data, dict) or data.get("attacker_plugin") != "incalmo_llm":
+            return data
+        data = dict(data)
+
+        attacker_spec = data.get("attacker_spec")
+        if isinstance(attacker_spec, str):
+            # Load path-based specs too, so UI and file-based experiments route alike.
+            attacker_spec = _load_spec(attacker_spec)
+            data["attacker_spec"] = attacker_spec
+        if not isinstance(attacker_spec, dict):
+            return data
+        if attacker_spec.get("guardrail_harness") != "environment_firewall":
+            return data
+
+        policy = attacker_spec.get("guardrail_policy")
+        if not isinstance(policy, str) or not policy.strip():
+            raise ValueError(
+                "guardrail_policy is required when guardrail_harness is 'environment_firewall'"
+            )
+        attacker_spec = dict(attacker_spec)
+        data["attacker_spec"] = attacker_spec
+
+        environment = data.get("environment")
+        if isinstance(environment, EnvironmentConfig):
+            environment = environment.model_dump()
+        if not isinstance(environment, dict):
+            return data
+
+        # These fields belong to EnvironmentConfig and are consumed by the
+        # environment deployer, which applies the selected firewall policy.
+        environment = dict(environment)
+        environment["guardrail_mode"] = "on"
+        environment["guardrail_policy"] = policy.strip()
+        data["environment"] = environment
+        return data
+
     @field_validator("environment", mode="before")
     @classmethod
     def _require_explicit_environment(cls, v):

@@ -21,6 +21,9 @@ class MHBenchEnvironment(EnvironmentPlugin, config_type="mhbench"):
     type: Literal["mhbench"] = "mhbench"
     environment_spec: str  # PATH to a topology JSON (abs, or relative to mhbench_dir)
 
+    guardrail_mode: Literal["off", "on"] = "off"
+    guardrail_policy: Optional[str] = None
+
     @property
     def spec(self) -> str:
         """The short env label: the topology file's stem."""
@@ -40,6 +43,9 @@ class MHBenchEnvironment(EnvironmentPlugin, config_type="mhbench"):
             "fields": [
                 {"field_type": "text", "label": "Environment spec (path to topology JSON)",
                  "key": "environment_spec"},
+                {"field_type": "flat_checkboxes", "label": "Environmet Guardrail", "key": "guardrail_mode",
+                 "options": ["off", "on"]},
+
             ],
         }
 

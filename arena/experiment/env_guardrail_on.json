@@ -1,0 +1,14 @@
+{
+  "experiment_name": "equifax_env_guardrail_on",
+  "environment": {
+    "environment_plugin": "mhbench",
+    "environment_spec": "environments/non-generated/equifax_small.json",
+    "guardrail_mode": "on",
+    "guardrail_policy": "equifax_block_database"
+  },
+  "attacker_plugin": "incalmo_strategy",
+  "attacker_spec": {
+    "strategy": "GraphSearch"
+  },
+  "teardown": true
+}

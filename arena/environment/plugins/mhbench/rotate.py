@@ -7,6 +7,7 @@ import subprocess
 from ....config import ExperimentManagerConfig
 from ....experiment import Experiment
 from .deployer import resolve_topology_path
+from .process_env import mhbench_cli_env
 from ....experiment_log import init_logger, log, output_root
 
 
@@ -36,6 +37,7 @@ def _rotate_sync(experiment: Experiment, cfg: ExperimentManagerConfig) -> None:
              "--project-name", name, "--mgmt-ip", bastion_ip],
             cwd=str(mhbench_dir),
             stdout=lf, stderr=lf,
+            env=mhbench_cli_env(cfg),
         )
     if result.returncode != 0:
         log(name, f"Warning: MHBench rotate-logs exited with code {result.returncode}, see {mhbench_log}")
